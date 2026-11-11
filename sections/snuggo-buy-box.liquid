@@ -1,0 +1,506 @@
+{%- comment -%}
+  Snuggo – mobile-first hero + buy box
+  ------------------------------------------------------------------
+  One section that replaces the product page's first screen and buy box.
+  - Every price comes from the product's variants through Shopify's money
+    filters, so the currency always follows the store's settings
+    and the sale ends cleanly when compare-at prices are removed.
+  - The "one or two" choice is a set of radios that set one hidden "id" input
+    inside a standard Shopify product form, so Add to cart works as usual,
+    including AJAX cart drawers. Tracking events still need checking on the live store.
+  - JavaScript only swaps pre-formatted text when the choice changes, runs
+    the single countdown, and shows the sticky bar.
+  Everything a marketer would change is a setting or a block in the theme editor.
+{%- endcomment -%}
+
+{%- liquid
+  assign p = product
+  if section.settings.product != blank
+    assign p = section.settings.product
+  endif
+  assign current = p.selected_or_first_available_variant
+  assign form_id = 'snb-form-' | append: section.id
+  assign rating = p.metafields.reviews.rating.value
+  assign rating_count = p.metafields.reviews.rating_count.value
+-%}
+
+<div
+  class="snb"
+  id="snb-{{ section.id }}"
+  data-section="{{ section.id }}"
+  data-label-add="{{ section.settings.button_label | escape }}"
+  data-label-soldout="{{ section.settings.sold_out_label | escape }}"
+  style="
+    --snb-bg: {{ section.settings.color_bg }};
+    --snb-text: {{ section.settings.color_text }};
+    --snb-accent: {{ section.settings.color_accent }};
+    --snb-accent-text: {{ section.settings.color_accent_text }};
+    --snb-soft: {{ section.settings.color_soft }};
+  "
+>
+  {%- liquid
+    # The announcement never hardcodes an amount: "[saving]" is replaced with the
+    # first variant's saving (the entry offer), in the storefront's currency. It is
+    # fixed for the page, so it doesn't change with ?variant= or the shopper's choice.
+    # With no saving (sale over), the fallback line is shown instead.
+    assign ann = section.settings.announcement
+    assign ann_v = p.variants.first
+    if ann contains '[saving]'
+      if ann_v.compare_at_price > ann_v.price
+        assign ann_save = ann_v.compare_at_price | minus: ann_v.price | money_without_trailing_zeros
+        assign ann = ann | replace: '[saving]', ann_save
+      else
+        assign ann = section.settings.announcement_fallback
+      endif
+    endif
+  -%}
+  {%- if ann != blank -%}
+    <p class="snb__announce">{{ ann }}</p>
+  {%- endif -%}
+
+  <div class="snb__grid">
+    {%- comment -%} Gallery: native scroll-snap, no slider library. Reorder media in the product admin. {%- endcomment -%}
+    <div class="snb__gallery">
+      <ul class="snb__track" aria-label="{{ p.title | escape }} images">
+        {%- for media in p.media -%}
+          <li class="snb__slide" id="snb-{{ section.id }}-m{{ forloop.index }}">
+            {%- case media.media_type -%}
+              {%- when 'image' -%}
+                {%- if forloop.first -%}
+                  {{ media | image_url: width: 1100 | image_tag: widths: '390, 600, 828, 1100', sizes: '(min-width: 990px) 50vw, 100vw', loading: 'eager', fetchpriority: 'high', alt: media.alt }}
+                {%- else -%}
+                  {{ media | image_url: width: 1100 | image_tag: widths: '390, 600, 828, 1100', sizes: '(min-width: 990px) 50vw, 100vw', loading: 'lazy', alt: media.alt }}
+                {%- endif -%}
+              {%- when 'video' -%}
+                {{ media | video_tag: image_size: '1100x', autoplay: false, loop: true, muted: true, controls: true, playsinline: true, preload: 'none' }}
+              {%- when 'external_video' -%}
+                {{ media | external_video_tag: loading: 'lazy' }}
+            {%- endcase -%}
+          </li>
+        {%- endfor -%}
+      </ul>
+      {%- if section.settings.image_badge != blank -%}
+        <span class="snb__badge">{{ section.settings.image_badge }}</span>
+      {%- endif -%}
+      {%- if p.media.size > 1 -%}
+        <span class="snb__count" aria-hidden="true"><span data-snb-index>1</span> / {{ p.media.size }}</span>
+      {%- endif -%}
+    </div>
+
+    <div class="snb__info">
+      {%- if section.settings.show_name and section.settings.heading != blank -%}
+        <p class="snb__name">{{ section.settings.name_label | default: p.title }}</p>
+      {%- endif -%}
+      <h1 class="snb__title">{{ section.settings.heading | default: p.title }}</h1>
+
+      {%- if rating != blank -%}
+        {%- assign pct = rating.rating | times: 100.0 | divided_by: rating.scale_max -%}
+        <a class="snb__rating" href="#{{ section.settings.reviews_anchor }}">
+          <span class="snb__stars" style="--pct: {{ pct }}%" aria-hidden="true">★★★★★</span>
+          <span>{{ rating.rating | round: 1 }} · {{ rating_count }} parent reviews</span>
+        </a>
+      {%- elsif section.settings.quote != blank -%}
+        <p class="snb__quote">“{{ section.settings.quote }}” <span>{{ section.settings.quote_author }}</span></p>
+      {%- endif -%}
+
+      {%- if section.settings.subheading != blank -%}
+        <p class="snb__sub">{{ section.settings.subheading }}</p>
+      {%- endif -%}
+
+      <div class="snb__price" aria-live="polite">
+        <span class="snb__now" data-snb-price>{{ current.price | money_without_trailing_zeros }}</span>
+        {%- if current.compare_at_price > current.price -%}
+          <s class="snb__was" data-snb-compare>{{ current.compare_at_price | money_without_trailing_zeros }}</s>
+          <span class="snb__save" data-snb-save>Save {{ current.compare_at_price | minus: current.price | money_without_trailing_zeros }}</span>
+        {%- else -%}
+          <s class="snb__was" data-snb-compare hidden></s>
+          <span class="snb__save" data-snb-save hidden></span>
+        {%- endif -%}
+      </div>
+
+      {%- if section.settings.show_afterpay -%}
+        <p class="snb__instal">or 4 interest-free payments of <strong data-snb-afterpay>{{ current.price | divided_by: 4 | money }}</strong> with Afterpay</p>
+      {%- endif -%}
+
+      {%- comment -%}
+        The countdown depends on two things: the end date (a setting) AND a real sale price
+        on the selected variant (compare-at above price). If either is missing it stays hidden,
+        so the timer can never advertise a sale the prices don't show. Prices themselves still
+        change only when compare-at prices are edited in the product admin.
+      {%- endcomment -%}
+      {%- if section.settings.sale_label != blank and section.settings.sale_end != blank -%}
+        <p class="snb__sale" data-snb-end="{{ section.settings.sale_end }}" hidden>
+          {{ section.settings.sale_label }} · <span data-snb-countdown></span>
+        </p>
+      {%- endif -%}
+
+      {%- form 'product', p, id: form_id, class: 'snb__form', novalidate: 'novalidate' -%}
+        {%- comment -%}
+          The variant sent to the cart is this single hidden input. The radios below
+          only drive it, so theme or app scripts that read form [name="id"] (as AJAX
+          cart drawers often do) always get the chosen variant, not the first radio.
+        {%- endcomment -%}
+        <input type="hidden" name="id" value="{{ current.id }}" data-snb-id>
+        {%- unless p.has_only_default_variant -%}
+          <fieldset class="snb__options">
+            <legend class="snb__legend">{{ section.settings.options_label }}</legend>
+            {%- for v in p.variants -%}
+              {%- liquid
+                assign units = v.metafields.custom.units.value | default: 1
+                assign each = v.price | divided_by: units
+                assign v_save = 0
+                if v.compare_at_price > v.price
+                  assign v_save = v.compare_at_price | minus: v.price
+                endif
+              -%}
+              <label class="snb__opt">
+                <input
+                  type="radio"
+                  name="snb-choice-{{ section.id }}"
+                  data-snb-choice
+                  value="{{ v.id }}"
+                  {% if v.id == current.id %}checked{% endif %}
+                  {% unless v.available %}disabled{% endunless %}
+                  data-price="{{ v.price | money_without_trailing_zeros }}"
+                  data-compare="{% if v_save > 0 %}{{ v.compare_at_price | money_without_trailing_zeros }}{% endif %}"
+                  data-save="{% if v_save > 0 %}Save {{ v_save | money_without_trailing_zeros }}{% endif %}"
+                  data-afterpay="{{ v.price | divided_by: 4 | money }}"
+                  data-available="{{ v.available }}"
+                >
+                <span class="snb__opt-main">
+                  <span class="snb__opt-name">{{ v.title }}</span>
+                  {%- if v.metafields.custom.tagline != blank -%}
+                    <span class="snb__opt-tag">{{ v.metafields.custom.tagline.value }}</span>
+                  {%- endif -%}
+                </span>
+                <span class="snb__opt-price">
+                  {{ v.price | money_without_trailing_zeros }}
+                  {%- if units > 1 -%}
+                    <span class="snb__opt-each">{{ each | money }} each</span>
+                  {%- elsif v_save > 0 -%}
+                    <s class="snb__opt-was">{{ v.compare_at_price | money_without_trailing_zeros }}</s>
+                  {%- endif -%}
+                  {%- if v_save > 0 -%}
+                    <span class="snb__opt-save">Save {{ v_save | money_without_trailing_zeros }}</span>
+                  {%- endif -%}
+                </span>
+                {%- unless v.available -%}<span class="snb__opt-tag">Sold out</span>{%- endunless -%}
+              </label>
+            {%- endfor -%}
+          </fieldset>
+        {%- endunless -%}
+
+        {%- if section.settings.fit_note != blank -%}
+          <p class="snb__note">{{ section.settings.fit_note }}</p>
+        {%- endif -%}
+
+        <button type="submit" name="add" class="snb__atc" data-snb-atc data-snb-buy {% unless current.available %}disabled{% endunless %}>
+          {%- if current.available -%}{{ section.settings.button_label }}{%- else -%}{{ section.settings.sold_out_label }}{%- endif -%}
+        </button>
+      {%- endform -%}
+
+      {%- liquid
+        assign trust_blocks = section.blocks | where: 'type', 'trust'
+      -%}
+      {%- if trust_blocks.size > 0 -%}
+        <ul class="snb__trust">
+          {%- for block in trust_blocks -%}
+            <li {{ block.shopify_attributes }}>
+              <svg aria-hidden="true" viewBox="0 0 20 20" width="18" height="18"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              {%- if block.settings.link != blank -%}
+                <a href="{{ block.settings.link }}">{{ block.settings.text }}</a>
+              {%- else -%}
+                <span>{{ block.settings.text }}</span>
+              {%- endif -%}
+            </li>
+          {%- endfor -%}
+        </ul>
+      {%- endif -%}
+
+      <div class="snb__facts">
+        {%- if section.settings.delivery_note != blank -%}<div class="snb__fact">{{ section.settings.delivery_note }}</div>{%- endif -%}
+        {%- if section.settings.returns_note != blank -%}<div class="snb__fact">{{ section.settings.returns_note }}</div>{%- endif -%}
+        {%- if section.settings.cost_note != blank -%}<div class="snb__fact">{{ section.settings.cost_note }}</div>{%- endif -%}
+      </div>
+    </div>
+  </div>
+
+  {%- if section.settings.show_sticky -%}
+    <div class="snb__sticky" data-snb-sticky aria-hidden="true">
+      <span class="snb__sticky-price"><span data-snb-price>{{ current.price | money_without_trailing_zeros }}</span></span>
+      <button type="submit" form="{{ form_id }}" name="add" class="snb__atc snb__atc--sticky" data-snb-buy tabindex="-1" {% unless current.available %}disabled{% endunless %}>
+        {%- if current.available -%}{{ section.settings.button_label }}{%- else -%}{{ section.settings.sold_out_label }}{%- endif -%}
+      </button>
+    </div>
+  {%- endif -%}
+</div>
+
+<script>
+  (function () {
+    // Each init returns a cleanup function, so the theme editor can reload the
+    // section without leaving timers or observers behind.
+    window.SnuggoBuyBox = window.SnuggoBuyBox || {};
+    var registry = window.SnuggoBuyBox;
+
+    function init(root) {
+      var cleanups = [];
+      var form = root.querySelector('.snb__form');
+      var sale = root.querySelector('[data-snb-end]');
+      var saleActive = true; // false when the selected variant has no sale price
+
+      function setText(sel, value) {
+        root.querySelectorAll(sel).forEach(function (el) {
+          el.textContent = value || '';
+          el.hidden = !value;
+        });
+      }
+
+      // 1. Choice changes: copy the pre-formatted (Liquid, money-filtered) strings
+      //    and the selected variant's availability onto both buttons.
+      if (form) {
+        var idInput = form.querySelector('[data-snb-id]');
+        var onChange = function (e) {
+          var r = e.target;
+          if (!r.hasAttribute('data-snb-choice')) return;
+          if (idInput) idInput.value = r.value;
+          setText('[data-snb-price]', r.dataset.price);
+          setText('[data-snb-compare]', r.dataset.compare);
+          setText('[data-snb-save]', r.dataset.save);
+          setText('[data-snb-afterpay]', r.dataset.afterpay);
+          var available = r.dataset.available === 'true';
+          root.querySelectorAll('[data-snb-buy]').forEach(function (btn) {
+            btn.disabled = !available;
+            btn.textContent = available ? root.dataset.labelAdd : root.dataset.labelSoldout;
+          });
+          saleActive = !!r.dataset.save;
+          if (sale) tick();
+          var url = new URL(window.location.href);
+          url.searchParams.set('variant', r.value);
+          history.replaceState(null, '', url);
+        };
+        form.addEventListener('change', onChange);
+        cleanups.push(function () { form.removeEventListener('change', onChange); });
+        var checked = form.querySelector('[data-snb-choice]:checked');
+        if (checked) {
+          saleActive = !!checked.dataset.save;
+          if (idInput) idInput.value = checked.value; // e.g. after back/forward cache restore
+        }
+      }
+
+      // 2. One countdown, shown only before the end date AND while the selected
+      //    variant really has a sale price.
+      var tick = function () {};
+      if (sale) {
+        var end = Date.parse(sale.dataset.snbEnd);
+        var out = sale.querySelector('[data-snb-countdown]');
+        tick = function () {
+          var ms = end - Date.now();
+          if (isNaN(end) || ms <= 0 || !saleActive) { sale.hidden = true; return ms > 0; }
+          var d = Math.floor(ms / 864e5), h = Math.floor(ms / 36e5) % 24, m = Math.floor(ms / 6e4) % 60;
+          out.textContent = 'ends in ' + (d ? d + 'd ' : '') + h + 'h ' + m + 'm';
+          sale.hidden = false;
+          return true;
+        };
+        if (tick()) {
+          var timer = setInterval(tick, 30000);
+          cleanups.push(function () { clearInterval(timer); });
+        }
+      }
+
+      if ('IntersectionObserver' in window) {
+        // 3. Sticky bar: visible whenever the main button is out of view.
+        var sticky = root.querySelector('[data-snb-sticky]');
+        var atc = root.querySelector('[data-snb-atc]');
+        if (sticky && atc) {
+          var stickyObs = new IntersectionObserver(function (entries) {
+            var show = !entries[0].isIntersecting;
+            sticky.classList.toggle('is-on', show);
+            sticky.setAttribute('aria-hidden', String(!show));
+            sticky.querySelector('button').tabIndex = show ? 0 : -1;
+            document.documentElement.classList.toggle('snb-sticky-on', show);
+          });
+          stickyObs.observe(atc);
+          cleanups.push(function () {
+            stickyObs.disconnect();
+            document.documentElement.classList.remove('snb-sticky-on');
+          });
+        }
+
+        // 4. Gallery counter: the slide that is mostly visible, whatever the width.
+        var track = root.querySelector('.snb__track');
+        var idx = root.querySelector('[data-snb-index]');
+        if (track && idx) {
+          var slides = Array.prototype.slice.call(track.children);
+          var galObs = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) {
+              if (en.isIntersecting) idx.textContent = slides.indexOf(en.target) + 1;
+            });
+          }, { root: track, threshold: 0.6 });
+          slides.forEach(function (sl) { galObs.observe(sl); });
+          cleanups.push(function () { galObs.disconnect(); });
+        }
+      }
+
+      return function () { cleanups.forEach(function (fn) { fn(); }); };
+    }
+
+    function mount(sectionId) {
+      var root = document.getElementById('snb-' + sectionId);
+      if (!root || root.dataset.snbReady) return;
+      root.dataset.snbReady = 'true';
+      if (registry[sectionId]) registry[sectionId]();
+      registry[sectionId] = init(root);
+    }
+
+    // Theme editor: tear down on unload, (re)mount on load. Registered once per page.
+    if (!registry.__listening) {
+      registry.__listening = true;
+      document.addEventListener('shopify:section:unload', function (e) {
+        var id = e.detail && e.detail.sectionId;
+        if (id && registry[id]) { registry[id](); delete registry[id]; }
+      });
+      document.addEventListener('shopify:section:load', function (e) {
+        if (e.detail && e.detail.sectionId) mount(e.detail.sectionId);
+      });
+    }
+
+    mount('{{ section.id }}');
+  })();
+</script>
+
+{% stylesheet %}
+  .snb { background: var(--snb-bg); color: var(--snb-text); }
+  .snb__announce { margin: 0; padding: 8px 16px; text-align: center; font-size: 14px; font-weight: 600; background: var(--snb-text); color: var(--snb-bg); }
+  .snb__grid { display: grid; gap: 0; max-width: 1200px; margin: 0 auto; }
+
+  /* Gallery: shorter than square on phones so the price shows on the first screen */
+  .snb__gallery { position: relative; }
+  .snb__track { display: flex; margin: 0; padding: 0; list-style: none; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  .snb__track::-webkit-scrollbar { display: none; }
+  .snb__slide { flex: 0 0 100%; scroll-snap-align: start; aspect-ratio: 4 / 5; max-height: 52svh; width: 100%; background: var(--snb-soft); }
+  .snb__slide img, .snb__slide video, .snb__slide iframe { width: 100%; height: 100%; object-fit: cover; display: block; border: 0; }
+  .snb__badge, .snb__count { position: absolute; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 6px 12px; background: var(--snb-bg); color: var(--snb-text); }
+  .snb__badge { top: 12px; left: 12px; }
+  .snb__count { bottom: 12px; right: 12px; opacity: .9; }
+
+  .snb__info { padding: 16px 20px 24px; }
+  .snb__name { margin: 0 0 4px; font-size: 14px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .75; }
+  .snb__title { margin: 0 0 6px; font-size: clamp(26px, 7vw, 40px); line-height: 1.1; }
+  .snb__rating { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; color: inherit; text-decoration: none; margin-bottom: 8px; }
+  .snb__stars { position: relative; color: #d9cfc4; letter-spacing: 2px; }
+  .snb__stars::before { content: '★★★★★'; position: absolute; inset: 0; width: var(--pct); overflow: hidden; color: #e8a33d; }
+  .snb__quote { margin: 0 0 8px; font-size: 15px; font-style: italic; }
+  .snb__quote span { font-style: normal; font-size: 13px; opacity: .8; }
+  .snb__sub { margin: 0 0 12px; font-size: 16px; line-height: 1.45; }
+
+  .snb__price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 4px 0; }
+  .snb__now { font-size: 32px; font-weight: 700; }
+  .snb__was { opacity: .7; font-size: 18px; }
+  .snb__save { background: var(--snb-accent); color: var(--snb-accent-text); border-radius: 999px; padding: 3px 10px; font-size: 13px; font-weight: 700; }
+  .snb__instal { margin: 0 0 8px; font-size: 14px; }
+  .snb__sale { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+
+  .snb__options { border: 0; margin: 12px 0 8px; padding: 0; display: grid; gap: 10px; }
+  .snb__legend { font-weight: 700; font-size: 15px; margin-bottom: 8px; padding: 0; }
+  .snb__opt { position: relative; display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: center; min-height: 60px; padding: 12px 14px; border: 2px solid var(--snb-soft); border-radius: 12px; cursor: pointer; background: #fff; }
+  .snb__opt:has(input:checked) { border-color: var(--snb-text); }
+  .snb__opt:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+  .snb__opt input { width: 20px; height: 20px; margin: 0; accent-color: var(--snb-text); }
+  .snb__opt-main, .snb__opt-price { display: grid; }
+  .snb__opt-name { font-weight: 700; }
+  .snb__opt-tag, .snb__opt-each, .snb__opt-was { font-size: 13px; opacity: .8; }
+  .snb__opt-price { text-align: right; font-weight: 700; }
+  .snb__opt-save { font-size: 12px; font-weight: 700; color: #b23b35; }
+  .snb__note { margin: 4px 0 12px; font-size: 14px; }
+
+  .snb__atc { width: 100%; min-height: 54px; border: 0; border-radius: 999px; background: var(--snb-accent); color: var(--snb-accent-text); font-size: 17px; font-weight: 700; cursor: pointer; }
+  .snb__atc:disabled { opacity: .5; cursor: not-allowed; }
+  .snb__atc:focus-visible, .snb__opt:has(input:focus-visible) { outline: 3px solid var(--snb-text); outline-offset: 3px; }
+
+  .snb__trust { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+  .snb__trust li { display: flex; gap: 8px; align-items: center; }
+  .snb__trust svg { flex: none; color: #4c8a5a; }
+  .snb__trust a { color: inherit; }
+  .snb__facts { display: grid; gap: 6px; font-size: 14px; border-top: 1px solid var(--snb-soft); padding-top: 12px; }
+  .snb__fact p { margin: 0; }
+
+  .snb__sticky { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: flex; gap: 12px; align-items: center; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--snb-bg); box-shadow: 0 -2px 12px rgba(0,0,0,.08); transform: translateY(110%); transition: transform .2s ease; }
+  .snb__sticky.is-on { transform: none; }
+  .snb__sticky-price { font-weight: 700; font-size: 18px; white-space: nowrap; }
+  .snb__atc--sticky { min-height: 48px; }
+  /* Keep floating theme buttons (e.g. back to top) clear of the sticky bar */
+  html.snb-sticky-on #scroll-to-top-button, html.snb-sticky-on .scroll-to-top { bottom: 90px !important; }
+
+  @media (min-width: 990px) {
+    .snb__grid { grid-template-columns: 1fr 1fr; gap: 48px; padding: 32px; }
+    .snb__slide { max-height: none; border-radius: 16px; }
+    .snb__track { border-radius: 16px; }
+    .snb__info { padding: 0; }
+    .snb__sticky { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .snb__sticky { transition: none; } }
+{% endstylesheet %}
+
+{% schema %}
+{
+  "name": "Snuggo buy box",
+  "tag": "section",
+  "class": "section-snuggo-buy-box",
+  "settings": [
+    { "type": "product", "id": "product", "label": "Product", "info": "Leave empty on the product page to use the current product." },
+    { "type": "header", "content": "Top of page" },
+    { "type": "text", "id": "announcement", "label": "Announcement line", "default": "Black Friday: save [saving] · Free shipping", "info": "[saving] is replaced with the current saving in the shopper's currency. Remove the theme's own announcement bars so this is the only one." },
+    { "type": "text", "id": "announcement_fallback", "label": "Announcement when there is no sale price", "default": "Free shipping on all orders" },
+    { "type": "text", "id": "image_badge", "label": "Badge on first image", "default": "Christmas gift · ages 3 to 8" },
+    { "type": "header", "content": "Product text" },
+    { "type": "checkbox", "id": "show_name", "label": "Show product name above heading", "default": false },
+    { "type": "text", "id": "name_label", "label": "Product name label", "info": "Leave empty to use the product title, e.g. Snuggo." },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Snuggo: their favourite toy, talking back", "info": "Leave empty to use the product title." },
+    { "type": "textarea", "id": "subheading", "label": "One-line promise", "default": "Snuggo is a small device that clips onto the plush they already love. Screen-free chats, and you read every word on your phone." },
+    { "type": "text", "id": "quote", "label": "Parent quote (shown only when there are no reviews yet)", "info": "Use a real customer's words only." },
+    { "type": "text", "id": "quote_author", "label": "Quote author", "info": "For example: – Parent, Melbourne" },
+    { "type": "text", "id": "reviews_anchor", "label": "Reviews section anchor", "default": "reviews" },
+    { "type": "header", "content": "Price and offer" },
+    { "type": "checkbox", "id": "show_afterpay", "label": "Show Afterpay instalments", "default": false, "info": "Off by default. Turn on only once Afterpay is confirmed as enabled at checkout for Australian customers." },
+    { "type": "text", "id": "sale_label", "label": "Sale label", "default": "Black Friday price" },
+    { "type": "text", "id": "sale_end", "label": "Sale end (ISO date and time with time zone)", "default": "2026-11-30T23:59:00+11:00", "info": "The countdown hides itself after this time. Remove compare-at prices in the product admin when the sale ends." },
+    { "type": "text", "id": "options_label", "label": "Choice label", "default": "How many?" },
+    { "type": "text", "id": "fit_note", "label": "Fit note under the choice", "default": "The soft loop fits most plush toys, from palm-sized bunnies to big bears." },
+    { "type": "text", "id": "button_label", "label": "Button label", "default": "Add to cart" },
+    { "type": "text", "id": "sold_out_label", "label": "Sold-out button label", "default": "Sold out" },
+    { "type": "checkbox", "id": "show_sticky", "label": "Show sticky Add to cart bar on mobile", "default": true },
+    { "type": "header", "content": "Facts under the button" },
+    { "type": "richtext", "id": "delivery_note", "label": "Delivery", "default": "<p><strong>Order by Tue 15 Dec for Christmas.</strong> Free shipping, 3 to 5 business days.</p>" },
+    { "type": "richtext", "id": "returns_note", "label": "Returns and warranty", "default": "<p>30-day returns · 1-year warranty</p>" },
+    { "type": "richtext", "id": "cost_note", "label": "Ongoing cost", "info": "Example: 'No subscription. The parent app is free.' Only add this if it is true." },
+    { "type": "header", "content": "Colours" },
+    { "type": "color", "id": "color_bg", "label": "Background", "default": "#FBF3EA" },
+    { "type": "color", "id": "color_text", "label": "Text", "default": "#3B2418" },
+    { "type": "color", "id": "color_accent", "label": "Button", "default": "#E2605A" },
+    { "type": "color", "id": "color_accent_text", "label": "Button text", "default": "#2A160E" },
+    { "type": "color", "id": "color_soft", "label": "Borders and placeholders", "default": "#EADBCB" }
+  ],
+  "blocks": [
+    {
+      "type": "trust",
+      "name": "Trust point",
+      "limit": 4,
+      "settings": [
+        { "type": "text", "id": "text", "label": "Text", "default": "Only listens while the button is held" },
+        { "type": "url", "id": "link", "label": "Link (optional)", "info": "For example, the privacy answers further down the page." }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Snuggo buy box",
+      "blocks": [
+        { "type": "trust", "settings": { "text": "Only listens while the button is held" } },
+        { "type": "trust", "settings": { "text": "No camera, no screen" } },
+        { "type": "trust", "settings": { "text": "You read every word in the free parent app" } }
+      ]
+    }
+  ],
+  "enabled_on": { "templates": ["product"] }
+}
+{% endschema %}
